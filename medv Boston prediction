@@ -1,0 +1,126 @@
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+data=pd.read_csv('boston.csv')
+data.head()
+
+#Target prediksi: to predict the price of the house (medv)
+
+#Exploratory Data
+data.isnull().sum()
+sns.set(rc={'figure.figsize':(11.7,8.27)})
+sns.boxplot(data['medv'])
+plt.show()
+
+#Remove the outlier from the data
+
+Q1=np.percentile(data['medv'],25,interpolation='midpoint')
+Q3=np.percentile(data['medv'],75,interpolation='midpoint')
+IQR=Q3-Q1
+
+print("Old data:",data.shape)
+
+upper=np.where(data['medv']>=(Q3+1.5*IQR))
+lower=np.where(data['medv']<=(Q1-1.5*IQR))
+
+data.drop(upper[0],inplace=True)
+data.drop(lower[0],inplace=True)
+
+print("New Shape:",data.shape)
+#split train test
+from sklearn.model_selection import train_test_split
+
+feature = data.drop(columns='medv')
+target = data[['medv']]
+
+feature_data_pretrain, feature_data_test, target_data_pretrain, target_data_test = train_test_split(feature, target, test_size=0.20, random_state=42)
+
+feature_data_train, feature_data_validation, target_data_train, target_data_validation = train_test_split(feature_data_pretrain, target_data_pretrain, test_size=0.20, random_state=42)
+
+# calculate VIF scores
+from statsmodels.stats.outliers_influence import variance_inflation_factor as vif 
+from statsmodels.tools.tools import add_constant
+
+X = add_constant(feature_admit_train)
+
+vif_df = pd.DataFrame([vif(X.values, i) 
+               for i in range(X.shape[1])], 
+              index=X.columns).reset_index()
+vif_df.columns = ['feature','vif_score']
+vif_df = vif_df.loc[vif_df.feature!='const']
+vif_df
+
+# heatmap correlation
+data_train = pd.concat([feature_data_train, target_data_train], axis=1)
+corr = data_train.corr()
+
+plt.figure(figsize=(10,7))
+sns.heatmap(corr, annot=True, fmt='.2f')
+plt.show()
+
+#Drop the multicorellation
+feature_data_train = feature_data_train.drop(columns=['indus','nox','dis','tax','age'])
+feature_data_validation = feature_data_validation.drop(columns=['indus','nox','dis','tax','age'])
+feature_data_test = feature_data_test.drop(columns=['indus','nox','dis','tax','age'])
+
+#Train multipel lamda for RIDGE
+from sklearn.linear_model import Ridge
+
+# train the model
+X_data_train = feature_data_train.to_numpy()
+y_data_train = target_data_train.to_numpy()
+y_data_train = y_data_train.reshape(len(y_data_train),)
+
+# define the model
+ridge_reg_pointzeroone = Ridge(alpha=0.01, random_state=42)
+ridge_reg_pointone = Ridge(alpha=0.1, random_state=42)
+ridge_reg_one = Ridge(alpha=1, random_state=42)
+ridge_reg_ten = Ridge(alpha=10, random_state=42)
+
+# fit the model (training)
+ridge_reg_pointzeroone.fit(X_data_train, y_data_train)
+ridge_reg_pointone.fit(X_data_train, y_data_train)
+ridge_reg_one.fit(X_data_train, y_data_train)
+ridge_reg_ten.fit(X_data_train, y_data_train)
+
+#find the best model RIDGE
+from sklearn.metrics import mean_squared_error
+
+X_data_validation = feature_data_validation.to_numpy()
+y_data_validation = target_data_validation.to_numpy()
+y_data_validation = y_data_validation.reshape(len(y_data_validation),)
+
+alphas = [0.01, 0.1, 1., 10]
+models = [ridge_reg_pointzeroone,
+          ridge_reg_pointone,
+          ridge_reg_one,
+          ridge_reg_ten]
+
+for model, alpha in zip(models, alphas):
+    y_predict_validation = model.predict(X_data_validation)
+    rmse = np.sqrt(mean_squared_error(y_data_validation,y_predict_validation))
+    print(f'RMSE of Ridge regression model with alpha = {alpha} is {rmse}')
+  
+  #Coefficients RIDGE
+ridge_best = ridge_reg_pointzeroone
+
+coef_df = pd.DataFrame({
+    'feature':['Intercept'] + feature_data_train.columns.tolist(),
+    'coefficient':[model.intercept_] + list(model.coef_)
+})
+
+coef_df
+
+#Evaluate RIDGE
+# prepare prediction result on train data
+y_predict_train = ridge_best.predict(X_data_train)
+
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_percentage_error
+
+print('RMSE for training data is {}'.format(np.sqrt(mean_squared_error(y_predict_train, y_data_train))))
+print('MAE for training data is {}'.format(mean_absolute_error(y_predict_train, y_data_train)))
+print('MAPE for training data is {}'.format(mean_absolute_percentage_error(y_predict_train, y_data_train)))
